@@ -1,0 +1,90 @@
+from flask import Flask, request, jsonify
+import google.auth
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request
+from google.ads.google_ads.client import GoogleAdsClient
+import requests
+import json
+
+app = Flask(__name__)
+
+# Set up the Google Ads API client
+def setup_google_ads_client():
+    credentials, project_id = google.auth.default(
+        scopes=['https://www.googleapis.com/auth/adwords']
+    )
+    # Check if the credentials have expired or not, and refresh if needed
+    if credentials.expired and credentials.refresh_token:
+        try:
+            credentials.refresh(Request())
+        except RefreshError:
+            raise ValueError(
+                'The credentials have expired and failed to refresh.'
+            )
+    return GoogleAdsClient(credentials=credentials)
+
+# Create a new Google Ads account
+def create_account(google_ads_client):
+    customer_service = google_ads_client.service.customer_service
+    customer = customer_service.mutate(
+        customer_operation=customer_service.create_customer()
+    ).resource_name
+    return customer
+
+# Get a list of all Google Ads accounts associated with the authenticated user
+def get_accounts(google_ads_client):
+    customer_service = google_ads_client.service.customer_service
+    response = customer_service.list_accessible_customers()
+    accounts = []
+    for customer in response.resource_names:
+        accounts.append(customer)
+    return accounts
+
+# Publish a message to Kafka
+def publish_message_to_kafka(kafka_topic, message):
+    kafka_server = 'localhost:9092'  # replace with your Kafka server address
+    url = f'http://{kafka_server}/topics/{kafka_topic}'
+    headers = {
+        'Content-Type': 'application/vnd.kafka.json.v2+json'
+    }
+    data = {
+        "records": [
+            {
+                "key": None,
+                "value": {
+                    "message": message
+                }
+            }
+        ]
+    }
+    requests.post(url, headers=headers, data=json.dumps(data))
+
+# Define API endpoints
+@app.route('/create_account', methods=['POST'])
+def create_new_account():
+    # Get the Google Ads API client
+    google_ads_client = setup_google_ads_client()
+    # Create a new account and get its resource name
+    new_account = create_account(google_ads_client)
+    # Get a list of all accounts and print their resource names
+    accounts = get_accounts(google_ads_client)
+    # Publish a message to Kafka with the new account's resource name
+    kafka_topic = 'new_google_ads_accounts'
+    message = new_account
+    publish_message_to_kafka(kafka_topic, message)
+    # Return the new account's resource name as a response
+    response = {'new_account': new_account}
+    return jsonify(response)
+
+@app.route('/get_accounts', methods=['GET'])
+def get_all_accounts():
+    # Get the Google Ads API client
+    google_ads_client = setup_google_ads_client()
+    # Get a list of all accounts and return their resource names as a response
+    accounts = get_accounts(google_ads_client)
+    response = {'accounts': accounts}
+    return jsonify(response)
+
+# Run the API
+if __name__ == '__main__':
+    app.run(debug=True)
