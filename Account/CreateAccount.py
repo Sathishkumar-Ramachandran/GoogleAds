@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
-from google.ads.google_ads.client import GoogleAdsClient
+from google.ads.googleads.client import GoogleAdsClient
 from index import app
 
 
-@app.route('/create_google_ads_account', methods=['POST'])
+@app.route('/api/google/createaccount', methods=['POST'])
 def create_google_ads_account():
     # Get the required parameters from the request
     manager_account_id = request.json['manager_account_id']
